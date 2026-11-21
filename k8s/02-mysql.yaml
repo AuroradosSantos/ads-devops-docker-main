@@ -1,0 +1,119 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: n3-marcoandre
+data:
+  01-tabelas.sql: |
+    CREATE TABLE categorias (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        nome VARCHAR(100) NOT NULL,
+        descricao VARCHAR(255),
+        ativo TINYINT(1) DEFAULT 1,
+        criado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    INSERT INTO categorias (nome, descricao, ativo) VALUES
+    ('Eletrônicos', 'Produtos eletrônicos em geral', 1),
+    ('Alimentos', 'Itens alimentícios', 1),
+    ('Vestuário', 'Roupas e acessórios', 1);
+    CREATE TABLE produtos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        nome VARCHAR(100) NOT NULL,
+        preco DECIMAL(10,2) NOT NULL,
+        quantidade_estoque INT DEFAULT 0,
+        categoria_id INT,
+        FOREIGN KEY (categoria_id) REFERENCES categorias(id)
+    );
+    INSERT INTO produtos (nome, preco, quantidade_estoque, categoria_id) VALUES
+    ('Fone de Ouvido Bluetooth', 89.90, 50, 1),
+    ('Arroz 5kg', 24.50, 120, 2),
+    ('Camiseta Básica', 39.90, 80, 3);
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: n3-marcoandre
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: n3-marcoandre
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: loja-secrets
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              value: loja
+            - name: MYSQL_USER
+              value: loja_app
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: loja-secrets
+                  key: mysql-password
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            periodSeconds: 5
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+            - name: mysql-init
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: mysql-data
+        - name: mysql-init
+          configMap:
+            name: mysql-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-db
+  namespace: n3-marcoandre
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+
